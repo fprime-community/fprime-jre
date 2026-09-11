@@ -82,7 +82,8 @@ tags). Optional integration tests run when `FPRIME_JRE_TEST_FPP_JAR` (path to an
 
 Updating Java: change `TEMURIN_RELEASE` in `build_runtime.py` and the version in
 `pyproject.toml` together; the build fails if they disagree. Publishing is by GitHub release
-through [publish.yml](.github/workflows/publish.yml) using PyPI trusted publishing.
+through [publish.yml](.github/workflows/publish.yml) using trusted publishing: wheels go to
+[TestPyPI](https://test.pypi.org/p/fprime-jre) first, then to PyPI.
 
 ## License
 
