@@ -4,10 +4,19 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      version:
+        description: Version (or tag) to publish instead of the one derived from git
+        type: string
+        required: false
+        default: ""
 
 jobs:
   build:
     uses: ./.github/workflows/build.yml
+    with:
+      # Pin to the release tag; git describe may pick another tag on the same commit
+      version: ${{ github.event.release.tag_name || inputs.version }}
 
   publish:
     name: Publish to TestPyPI and PyPI

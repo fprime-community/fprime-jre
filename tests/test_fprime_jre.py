@@ -6,6 +6,7 @@ Optional integration inputs:
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sysconfig
@@ -34,7 +35,9 @@ def test_paths_exist():
 def test_java_version_matches_package_version():
     from importlib.metadata import version
 
-    package = tuple(int(part) for part in version("fprime-jre").split("."))
+    # Release segment only: builds between tags carry a .devN+g<hash> suffix
+    release = re.match(r"\d+(?:\.\d+)*", version("fprime-jre")).group(0)
+    package = tuple(int(part) for part in release.split("."))
     assert fprime_jre.JAVA_VERSION == package[:-1]
     assert fprime_jre.JAVA_VERSION[0] == 25
 
