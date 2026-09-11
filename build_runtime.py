@@ -1,11 +1,15 @@
 """Build the trimmed Java runtime image bundled in the fprime-jre wheel
 
-Downloads the pinned Eclipse Temurin JDK for the build host from the Adoptium API, verifies its
-SHA-256, and assembles a runtime-only image with that JDK's jlink into src/fprime_jre/runtime.
-Runs at wheel-build time in CI (one job per platform), never on user machines.
+The package version comes from the git tag (setuptools_scm) and is the Eclipse Temurin JAVA_VERSION
+followed by a repackaging number: v25.0.4.1.0 bundles Temurin 25.0.4.1. This script downloads the
+GA Temurin JDK for that JAVA_VERSION and the build host from the Adoptium API, verifies its SHA-256,
+and assembles a runtime-only image with that JDK's jlink into src/fprime_jre/runtime. Runs at
+wheel-build time in CI (one job per platform), never on user machines.
 
     python build_runtime.py            # download Temurin and build the image
     python build_runtime.py --jdk DIR  # build from an already-unpacked Temurin JDK
+
+Set SETUPTOOLS_SCM_PRETEND_VERSION=<version> to build for a version that is not yet tagged.
 """
 
 import argparse
@@ -16,21 +20,20 @@ import re
 import shutil
 import subprocess
 import tarfile
-import tomllib
 import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
 
+import setuptools_scm
+
 ROOT = Path(__file__).resolve().parent
-PYPROJECT = ROOT / "pyproject.toml"
 RUNTIME_DIR = ROOT / "src" / "fprime_jre" / "runtime"
 BUILD_DIR = ROOT / "build" / "temurin"
 
-# The exact Temurin release. Its JAVA_VERSION must match the pyproject version minus the
-# repackaging number; the build fails otherwise.
-TEMURIN_RELEASE = "jdk-25.0.4.1+1"
-ADOPTIUM_API = "https://api.adoptium.net/v3/assets/release_name/eclipse/{release}"
+# Version-range lookup: [JAVA_VERSION, next) also matches later point releases (17.0.4 -> 17.0.4.1),
+# so results are filtered on the exact openjdk_version
+ADOPTIUM_API = "https://api.adoptium.net/v3/assets/version/{range}"
 # The Adoptium API and GitHub CDN reject requests carrying urllib's default User-Agent
 USER_AGENT = "fprime-jre-build (https://github.com/fprime-community/fprime-jre)"
 
@@ -62,11 +65,21 @@ ADOPTIUM_OS = {"Linux": "linux", "Darwin": "mac", "Windows": "windows"}
 ADOPTIUM_ARCH = {"x86_64": "x64", "amd64": "x64", "aarch64": "aarch64", "arm64": "aarch64"}
 
 
-def expected_java_version() -> str:
-    """JAVA_VERSION implied by the package version: everything but the repackaging number"""
-    with PYPROJECT.open("rb") as f:
-        version = tomllib.load(f)["project"]["version"]
-    return version.rsplit(".", 1)[0]
+def package_version() -> str:
+    """Package version from the git tag (or SETUPTOOLS_SCM_PRETEND_VERSION), as the wheel will carry it"""
+    try:
+        return setuptools_scm.get_version(root=ROOT)
+    except LookupError as error:
+        raise SystemExit(f"Cannot determine the version from git: {error}") from None
+
+
+def expected_java_version(version: str) -> str:
+    """JAVA_VERSION implied by a package version: the release segment minus the repackaging number"""
+    release = re.match(r"\d+(?:\.\d+)*", version)
+    parts = release.group(0).split(".") if release else []
+    if len(parts) < 2:
+        raise SystemExit(f"Version {version!r} must be <JAVA_VERSION>.<repackaging number>, e.g. 25.0.4.1.0")
+    return ".".join(parts[:-1])
 
 
 def host_target() -> tuple:
@@ -77,18 +90,33 @@ def host_target() -> tuple:
         raise SystemExit(f"Unsupported build host: {platform.system()} {platform.machine()}") from None
 
 
-def fetch_asset(os_name: str, arch: str) -> dict:
-    """Look up the JDK package (link, checksum, name) for the pinned release on Adoptium"""
+def fetch_asset(os_name: str, arch: str, java_version: str) -> dict:
+    """Look up the JDK package (link, checksum, name) of the latest GA Temurin build of a JAVA_VERSION"""
+    parts = java_version.split(".")
+    upper = ".".join(parts[:-1] + [str(int(parts[-1]) + 1)])
     query = urllib.parse.urlencode(
-        {"os": os_name, "architecture": arch, "image_type": "jdk", "heap_size": "normal", "project": "jdk"}
+        {
+            "os": os_name,
+            "architecture": arch,
+            "image_type": "jdk",
+            "heap_size": "normal",
+            "project": "jdk",
+            "release_type": "ga",
+            "vendor": "eclipse",
+        }
     )
-    url = ADOPTIUM_API.format(release=urllib.parse.quote(TEMURIN_RELEASE)) + "?" + query
+    url = ADOPTIUM_API.format(range=urllib.parse.quote(f"[{java_version},{upper})")) + "?" + query
     print(f"[INFO] Querying {url}")
     with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": USER_AGENT})) as response:
-        release = json.load(response)
+        releases = json.load(response)
+    releases = [r for r in releases if r["version_data"]["openjdk_version"].split("+")[0] == java_version]
+    if not releases:
+        raise SystemExit(f"No GA Temurin {java_version} JDK for {os_name}/{arch} on Adoptium")
+    release = max(releases, key=lambda r: r["version_data"]["build"])
+    print(f"[INFO] Using Temurin {release['release_name']}")
     binaries = [b for b in release["binaries"] if b["os"] == os_name and b["architecture"] == arch]
     if len(binaries) != 1:
-        raise SystemExit(f"Expected one {os_name}/{arch} binary for {TEMURIN_RELEASE}, found {len(binaries)}")
+        raise SystemExit(f"Expected one {os_name}/{arch} binary for {release['release_name']}, found {len(binaries)}")
     return binaries[0]["package"]
 
 
@@ -170,14 +198,16 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=RUNTIME_DIR, help=f"image directory (default: {RUNTIME_DIR})")
     args = parser.parse_args()
 
-    expected = expected_java_version()
+    version = package_version()
+    expected = expected_java_version(version)
+    print(f"[INFO] Package version {version}: bundling Temurin JAVA_VERSION {expected}")
     if args.jdk:
         jdk_home = find_jdk_home(args.jdk)
     else:
-        jdk_home = extract(download(fetch_asset(*host_target())))
+        jdk_home = extract(download(fetch_asset(*host_target(), expected)))
     actual = java_version(jdk_home)
     if actual != expected:
-        raise SystemExit(f"JDK at {jdk_home} is JAVA_VERSION {actual}; pyproject.toml expects {expected}")
+        raise SystemExit(f"JDK at {jdk_home} is JAVA_VERSION {actual}; package version {version} expects {expected}")
 
     jlink(jdk_home, args.output)
     print(f"[INFO] Runtime image written to {args.output}")

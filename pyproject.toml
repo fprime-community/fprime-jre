@@ -1,12 +1,12 @@
 [build-system]
-requires = ["setuptools>=77", "wheel"]
+requires = ["setuptools>=77", "setuptools_scm>=8", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "fprime-jre"
-# The first four numbers are the Eclipse Temurin JAVA_VERSION of the bundled runtime;
-# the last is the repackaging number. See build_runtime.py for the exact Temurin release.
-version = "25.0.4.1.0"
+# Version from the git tag (setuptools_scm): the Eclipse Temurin JAVA_VERSION of the bundled
+# runtime followed by a repackaging number, e.g. v25.0.4.1.0. See build_runtime.py.
+dynamic = ["version"]
 description = "A pip-installable Java runtime (Eclipse Temurin, jlink-trimmed) providing `java` for F Prime tools such as fpp and fprime-yamcs"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -41,6 +41,8 @@ Issues = "https://github.com/fprime-community/fprime-jre/issues"
 [project.scripts]
 java = "fprime_jre.__main__:main"
 fprime-jre = "fprime_jre.__main__:info"
+
+[tool.setuptools_scm]
 
 [tool.setuptools.packages.find]
 where = ["src"]

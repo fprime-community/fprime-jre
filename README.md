@@ -65,25 +65,36 @@ The package version is the Temurin `JAVA_VERSION` followed by a repackaging numb
 `25.0.4.1.0` bundles Temurin `jdk-25.0.4.1+1`. Consumers wanting Java 25 can depend on
 `fprime-jre>=25,<26`.
 
+The version comes from the git tag ([setuptools_scm](https://setuptools-scm.readthedocs.io/)),
+and the Temurin release is derived from it, so nothing in the repository changes for a release:
+
+- Repackaging the same Java: bump the last number (`v25.0.4.1.0` → `v25.0.4.1.1`).
+- Updating Java: tag the new `JAVA_VERSION` with repackaging number 0 (`v25.0.6.0.0`). The build
+  downloads the GA Temurin build of that `JAVA_VERSION` from Adoptium and fails if none exists.
+
+Builds between tags get a `.devN+g<hash>` version and bundle the previous tag's Java.
+
 ## Building
 
 Wheels are built by [CI](.github/workflows/build.yml), one job per platform, since the runtime
 must be linked on its target OS. To build locally (Python 3.11+ for the build script):
 
 ```bash
+pip install build setuptools_scm
 python build_runtime.py               # downloads Temurin from Adoptium, verifies SHA-256, runs jlink
 python -m build --wheel               # dist/fprime_jre-<version>-py3-none-<platform>.whl
 pip install dist/*.whl pytest && pytest tests
 ```
 
 `FPRIME_JRE_PLATFORM_TAG` overrides the wheel's platform tag (CI sets the manylinux/macosx
-tags). Optional integration tests run when `FPRIME_JRE_TEST_FPP_JAR` (path to an `fpp.jar`) or
-`FPRIME_JRE_TEST_YAMCS_DIR` (an unpacked YAMCS bundle) are set.
+tags). `SETUPTOOLS_SCM_PRETEND_VERSION=25.0.6.0.0` builds for a version that is not tagged yet,
+for example to try a new Java before releasing it. Optional integration tests run when
+`FPRIME_JRE_TEST_FPP_JAR` (path to an `fpp.jar`) or `FPRIME_JRE_TEST_YAMCS_DIR` (an unpacked
+YAMCS bundle) are set.
 
-Updating Java: change `TEMURIN_RELEASE` in `build_runtime.py` and the version in
-`pyproject.toml` together; the build fails if they disagree. Publishing is by GitHub release
-through [publish.yml](.github/workflows/publish.yml) using trusted publishing: wheels go to
-[TestPyPI](https://test.pypi.org/p/fprime-jre) first, then to PyPI.
+Publishing is by GitHub release through [publish.yml](.github/workflows/publish.yml): the release
+tag sets the version, and the wheels go to [TestPyPI](https://test.pypi.org/p/fprime-jre) and
+then PyPI using trusted publishing.
 
 ## License
 
