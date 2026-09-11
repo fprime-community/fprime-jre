@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fprime-jre"
+# The first four numbers are the Eclipse Temurin JAVA_VERSION of the bundled runtime;
+# the last is the repackaging number. See build_runtime.py for the exact Temurin release.
+version = "25.0.4.1.0"
+description = "A pip-installable Java runtime (Eclipse Temurin, jlink-trimmed) providing `java` for F Prime tools such as fpp and fprime-yamcs"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "GPL-2.0-only WITH Classpath-exception-2.0"
+license-files = ["LICENSE", "ASSEMBLY_EXCEPTION"]
+authors = [
+    {name = "Michael Starch", email = "LeStarch@googlemail.com"}
+]
+maintainers = [
+    {name = "Michael Starch", email = "LeStarch@googlemail.com"}
+]
+keywords = ["fprime", "fpp", "yamcs", "java", "jre", "jvm", "temurin"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Interpreters",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Java",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/fprime-community/fprime-jre"
+Repository = "https://github.com/fprime-community/fprime-jre"
+Issues = "https://github.com/fprime-community/fprime-jre/issues"
+
+[project.scripts]
+java = "fprime_jre.__main__:main"
+fprime-jre = "fprime_jre.__main__:info"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+fprime_jre = ["runtime/**/*", "runtime/**/.*"]
+
+[tool.ruff]
+line-length = 120
+# build_runtime.py uses tomllib; the shipped package itself supports 3.8+
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]

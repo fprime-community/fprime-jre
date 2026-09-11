@@ -1,0 +1,102 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install ruff
+      - run: ruff check . && ruff format --check .
+
+  build:
+    name: ${{ matrix.platform-tag }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform-tag: manylinux_2_17_x86_64.manylinux2014_x86_64
+          - os: ubuntu-24.04-arm
+            platform-tag: manylinux_2_17_aarch64.manylinux2014_aarch64
+          - os: macos-15-intel
+            platform-tag: macosx_11_0_x86_64
+          - os: macos-latest
+            platform-tag: macosx_11_0_arm64
+          - os: windows-latest
+            platform-tag: win_amd64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tools
+        run: python -m pip install -U pip build twine
+
+      - name: Build runtime image
+        run: python build_runtime.py
+      # Temurin links against glibc 2.17; the manylinux tag above asserts nothing newer is required
+      - name: Check glibc requirement (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          MAX=$(find src/fprime_jre/runtime -type f \( -name '*.so' -o -path '*/bin/*' \) -exec objdump -T {} + 2>/dev/null | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
+          echo "Highest glibc symbol version: ${MAX}"
+          test "$(printf '%s\n' "${MAX#GLIBC_}" 2.17 | sort -V | tail -1)" = "2.17"
+      - name: Build wheel
+        env:
+          FPRIME_JRE_PLATFORM_TAG: ${{ matrix.platform-tag }}
+        run: python -m build --wheel
+      - name: Check wheel
+        run: twine check dist/*
+
+      # Install into a clean venv (as a user would) and test the shim and runtime end to end
+      - name: Create test venv
+        shell: bash
+        run: |
+          python -m venv venv
+          BIN=venv/bin; [ -d venv/Scripts ] && BIN=venv/Scripts
+          echo "VENV_BIN=${PWD}/${BIN}" >> "$GITHUB_ENV"
+          "${BIN}/python" -m pip install -q -U pip
+          "${BIN}/python" -m pip install dist/*.whl pytest fprime-fpp
+      - name: Locate published fpp.jar
+        shell: bash
+        run: |
+          JAR=$("${VENV_BIN}/python" -c "import fprime_fpp, pathlib; print(pathlib.Path(fprime_fpp.__file__).parent / 'fpp.jar')")
+          test -f "${JAR}"
+          echo "FPRIME_JRE_TEST_FPP_JAR=${JAR}" >> "$GITHUB_ENV"
+      - name: Run tests
+        shell: bash
+        run: '"${VENV_BIN}/python" -m pytest -v tests'
+      # Unchanged fpp wrapper, no JAVA_HOME, venv first on PATH: must resolve to our java
+      - name: Run unchanged fpp on the shim
+        shell: bash
+        env:
+          JAVA_HOME: ""
+        run: |
+          export PATH="${VENV_BIN}:${PATH}"
+          unset JAVA_HOME
+          command -v java
+          java -XshowSettings:properties -version 2>&1 | grep "java.home"
+          printf 'module M { struct S { x: U32 } }\n' > M.fpp
+          fpp-check M.fpp
+          fpp-to-json -d . M.fpp && test -f fpp-ast.json
+          fpp-to-cpp -d . M.fpp && test -f SSerializableAc.hpp
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.platform-tag }}
+          path: dist/*.whl
+          if-no-files-found: error
