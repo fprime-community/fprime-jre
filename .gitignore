@@ -1,0 +1,9 @@
+# The runtime image is built by build_runtime.py, never committed
+src/fprime_jre/runtime/
+build/
+dist/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.venv/
